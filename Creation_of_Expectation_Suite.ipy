@@ -1,0 +1,79 @@
+# Pseudo code for creating an Expectation Suite with Great Expectations and PySpark
+
+# Step 1: Create the Spark Session and read the SparkDF
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder \
+    .appName("Create_Expectation_Suite") \
+    .getOrCreate()
+
+# Read the Spark DataFrame
+df = spark.read.parquet("PARQUET_PATH")
+
+# Step 2: Define the Expectation Suite name
+table_name = "TABLE_NAME"
+suite_name = "SUITE_NAME"
+expectation_suite_name = f"{table_name}.{suite_name}"
+
+# Step 3: Configure the Great Expectations Data Context
+from great_expectations.data_context.types.base import DataContextConfig
+from great_expectations.data_context import BaseDataContext
+from great_expectations.core.batch import RuntimeBatchRequest
+from great_expectations.checkpoint import SimpleCheckpoint
+
+# Step 3.1: Data Source configuration
+datasources = {
+    "filesystem_datasource": {
+        "class_name": "Datasource",
+        "module_name": "great_expectations.datasource",
+        "execution_engine": {
+            "module_name": "great_expectations.execution_engine",
+            "class_name": "SparkDFExecutionEngine"
+        },
+        "data_connectors": {
+            "runtime_data_connector": {
+                "class_name": "RuntimeDataConnector",
+                "batch_identifiers": ["batch_id"],
+            },
+        },
+    }
+}
+
+# Step 3.2: Expectation suites and Validation Results stores configuration
+expectations_adls_store = {
+    "class_name": "ExpectationsStore",
+    "store_backend": {
+        "class_name": "TupleAzureBlobStoreBackend",
+        "container": "STORAGE_CONTAINER",
+        "prefix": "expectations",
+        "connection_string": "AZURE_STORAGE_CONNECTION_STRING"
+     }
+}
+
+# Step 3.3: Instantiate the Data Context
+data_context_config = DataContextConfig(
+    datasources=datasources,
+    stores={
+        "expectations_store": expectations_adls_store,
+    },
+    expectations_store_name="expectations_store"
+)
+context = BaseDataContext(project_config=data_context_config)
+
+# Step 4: Get a batch of data and instantiate a Validator object
+batch_request = RuntimeBatchRequest(
+    datasource_name="filesystem_datasource",
+    data_connector_name="runtime_data_connector",
+    data_asset_name="data_asset_name",
+    batch_identifiers={"batch_id": "something_something"},
+    runtime_parameters={"batch_data": df},
+)
+
+# Step 5: Add Expectations to the Expectation Suite
+# Example Expectations (Replace with actual expectations)
+batch = context.get_batch(batch_request)
+batch.expect_column_values_to_be_unique("COLUMN_NAME")
+
+
+# Step 6: Save the Expectation Suite
+context.save_expectation_suite(batch.get_expectation_suite(), expectation_suite_name)

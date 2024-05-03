@@ -1,0 +1,103 @@
+# Pseudo code for performing data validation with Great Expectations and PySpark
+
+# Initialize the Spark Session and load the Spark DataFrame.
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder \
+    .appName("Data_Validation") \
+    .getOrCreate()
+
+# Read the Spark DataFrame
+df = spark.read.parquet("PARQUET_PATH")
+
+# Specify the Expectation Suite to be utilized for validation.
+expectation_suite_name = "EXPECTATION_SUITE_NAME"
+
+# Configure the Great Expectations Data Context:
+from great_expectations.data_context.types.base import DataContextConfig
+from great_expectations.data_context import BaseDataContext
+from great_expectations.core.batch import RuntimeBatchRequest
+from great_expectations.checkpoint import SimpleCheckpoint
+
+# Define the Data Source configuration.
+datasources = {
+    "filesystem_datasource": {
+        "class_name": "Datasource",
+        "module_name": "great_expectations.datasource",
+        "execution_engine": {
+            "module_name": "great_expectations.execution_engine",
+            "class_name": "SparkDFExecutionEngine"
+        },
+        "data_connectors": {
+            "runtime_data_connector": {
+                "class_name": "RuntimeDataConnector",
+                "batch_identifiers": ["batch_id"],
+            },
+        },
+    }
+}
+
+# Configure the storage locations for Expectation Suites and Validation Results.
+validations_adls_store = {
+    "class_name": "ValidationsStore",
+    "store_backend": {
+        "class_name": "TupleAzureBlobStoreBackend",
+        "container": "STORAGE_CONTAINER",
+        "prefix": "validations",
+        "connection_string": "AZURE_STORAGE_CONNECTION_STRING"
+     }
+}
+
+# Instantiate the Data Context.
+data_context_config = DataContextConfig(
+    datasources=datasources,
+    stores={
+        "validations_store": validations_adls_store,
+    },
+    validations_store_name="validations_store"
+)
+context = BaseDataContext(project_config=data_context_config)
+
+# Retrieve a batch of data and create a Validator object.
+batch_request = RuntimeBatchRequest(
+    datasource_name="filesystem_datasource",
+    data_connector_name="runtime_data_connector",
+    data_asset_name="data_asset_name",
+    batch_identifiers={"batch_id": "something_something"},
+    runtime_parameters={"batch_data": df},
+)
+
+# Perform data validation using a Checkpoint.
+checkpoint = SimpleCheckpoint(
+    name="checkpoint",
+    data_context=context,
+    class_name="SimpleCheckpoint",
+    action_list=[
+        {
+            "name": "store_validation_result",
+            "action": {
+                "class_name": "StoreValidationResultAction"
+            }
+        }
+    ]
+)
+
+# Flatten the JSON output and store it in a table.
+checkpoint_result = checkpoint.run(
+    run_id={"run_name": "RUN_NAME", "run_time": datetime.datetime.now(datetime.timezone.utc)},
+    run_name_template="%Y%m%d_%H%M%S",
+    validations=[
+        {
+            "batch_request": batch_request,
+            "expectation_suite_name": expectation_suite_name
+        }
+    ],
+    action_list=[
+        {
+            "name": "store_validation_result",
+            "action": {
+                "class_name": "StoreValidationResultAction"
+            }
+        }
+    ]
+)
